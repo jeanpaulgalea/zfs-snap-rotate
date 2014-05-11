@@ -223,7 +223,7 @@ BEGIN {
 /pattern/ && found > count {
   print
 }
-' while read snapshot;
+' | while read snapshot;
 do
 	if ! $ZFS destroy $recursive "$snapshot" 1>/dev/null 2>/dev/null ;
 	then
