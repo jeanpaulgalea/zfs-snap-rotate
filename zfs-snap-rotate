@@ -75,7 +75,7 @@ print_help() {
 	echo "Example 1:"
 	echo ""
 	echo " The following command takes a snapshot of zroot/home,"
-	echo " keeping up to seven "daily" snapshots at most."
+	echo " keeping up to seven 'daily' snapshots at most."
 	echo ""
 	echo "    $PROGNAME -f zroot/home -g daily -c 7"
 	echo ""
