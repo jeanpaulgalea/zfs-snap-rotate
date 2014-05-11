@@ -209,13 +209,18 @@ fi
 #	followed by dash,
 #	followed by group name
 #	and finally, end of line.
+#
+# the regular expression could be written in a more compact way,
+#	but then we'd loose portability between the different version of AWK.
 
 status=$STATUS_OK
 
 $ZFS list -t snapshot -H -r -d 1 -o name -S name "$filesystem" 2>/dev/null \
   | awk -v group=$group -v count=$count '
 BEGIN {
-  pattern="@[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}-" group "$"
+  pattern="\@[0-9][0-9][0-9][0-9]\-[0-9][0-9]\-[0-9][0-9]"
+  pattern=pattern "\T[0-9][0-9]\:[0-9][0-9]\:[0-9][0-9]"
+  pattern=pattern "\-" group "$"
 }
 /pattern/ {
   found++
