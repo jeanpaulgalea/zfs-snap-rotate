@@ -230,13 +230,20 @@ $0 ~ pattern {
 $0 ~ pattern && found > count {
   print
 }
-' | while read snapshot;
-do
-	if ! $ZFS destroy $recursive "$snapshot" 1>/dev/null 2>/dev/null ;
-	then
-		print_error "failed to rotate $snapshot"
-		status=$STATUS_ERROR
-	fi
-done
+' | \
 
-exit $status
+# piping to while creates a subshell.
+#
+# wrap while & exit within {},
+#	otherwise "exit $status" will always exit with $STATUS_OK
+{
+	while read snapshot; do
+		if ! $ZFS destroy $recursive "$snapshot" 1>/dev/null 2>/dev/null ;
+		then
+			print_error "failed to rotate $snapshot"
+			status=$STATUS_ERROR
+		fi
+	done
+
+	exit $status
+}
