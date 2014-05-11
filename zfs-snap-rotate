@@ -1,0 +1,235 @@
+#!/bin/sh
+
+# shell script to manage ZFS snapshots,
+#	with automatic rotation.
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+# default to whichever zfs is found in PATH,
+#	unless it was exported prior to invoking this script.
+ZFS=${ZFS:-zfs}
+
+PROGNAME=`basename "$0"`
+REVISION="1.0"
+
+STATUS_OK=0
+STATUS_ERROR=1
+STATUS_UNKNOWN=2
+
+print_error() {
+	echo "$PROGNAME error: $1"
+} >&2
+
+print_version() {
+	echo "$PROGNAME v$REVISION"
+} >&2
+
+print_usage() {
+	echo "Usage: "
+	echo " $PROGNAME [-r] -f FILESYSTEM -g GROUP -c COUNT"
+	echo " $PROGNAME --help"
+	echo " $PROGNAME --version"
+} >&2
+
+print_help() {
+	echo "$PROGNAME v$REVISION"
+	echo ""
+	echo "."
+	echo ""
+	print_usage
+	echo ""
+	echo "Options:"
+	echo " -h, --help"
+	echo "    Print detailed help screen."
+	echo ""
+	echo " -V, --version"
+	echo "    Print version information."
+	echo ""
+	echo " -r"
+	echo "    Recursively create snapshots of all descendent filesystems."
+	echo ""
+	echo "    When rotating, recursively destroy snapshots of all"
+	echo "    descendent filesystems as well."
+	echo ""
+	echo " -f FILESYSTEM"
+	echo "    ZFS filesystem name to be snapshotted."
+	echo ""
+	echo " -g GROUP"
+	echo "    A group name that will be used to group snapshots together."
+	echo ""
+	echo "    Group names can only consist of a-z, A-Z and 0-9 characters only."
+	echo ""
+	echo "    Grouping snapshots by a different name will allow for different"
+	echo "    rotation counts for each respective snapshot group."
+	echo ""
+	echo " -c COUNT"
+	echo "    Maximum number of snapshots to keep."
+	echo ""
+	echo "    After this limit is reached, older snapshots are destroyed automatically."
+	echo ""
+	echo "    If the -r flag was specified, older snapshots of descendent filesystems"
+	echo "    are also destroyed automatically."
+	echo ""
+	echo "    COUNT must be an integer greater or equal to 1."
+	echo ""
+	echo "Exit status"
+	echo " The following exit values are returned:"
+	echo ""
+	echo "    0 Successful completion."
+	echo ""
+	echo "    1 An error occured."
+	echo ""
+	echo "    2 Invalid command line options were specified."
+	echo ""
+	echo "Send email to jp@galea.se if you have questions, patches or suggestions."
+} >&2
+
+# no arguments
+
+if [ $# -lt 1 ] ;
+then
+	print_usage
+	exit $STATUS_UNKNOWN
+fi
+
+# defaults
+
+recursive=""
+
+while test -n "$1"; do
+	case "$1" in
+		--help)
+			print_help
+			exit $STATUS_OK
+			;;
+		-h)
+			print_help
+			exit $STATUS_OK
+			;;
+		--version)
+			print_version
+			exit $STATUS_OK
+			;;
+		-V)
+			print_version
+			exit $STATUS_OK
+			;;
+		-r)
+			recursive="-r"
+			;;
+		-f)
+			filesystem=$2
+			shift
+			;;
+		-g)
+			group=$2
+			shift
+			;;
+		-c)
+			count=$2
+			shift
+			;;
+		*)
+			echo "Unknown argument: $1" >&2
+			print_usage
+			exit $STATUS_UNKNOWN
+			;;
+	esac
+	shift
+done
+
+# empty arguments
+
+if [ -z "$filesystem" -o -z "$group" -o -z "$count" ] ;
+then
+	print_usage
+	exit $STATUS_UNKNOWN
+fi
+
+# filesystem must be available
+
+if ! $ZFS get -t filesystem filesystem "$filesystem" 1>/dev/null 2>/dev/null ;
+then
+	print_error "filesystem not found"
+	exit $STATUS_ERROR
+fi
+
+# fail if not empty, after removing all valid characters
+
+if [ -n "`echo "$group" | tr -d "[a-zA-Z0-9]"`" ] ;
+then
+	print_error "group name is not alphanumeric"
+	exit $STATUS_ERROR
+fi
+
+# fail if not empty, after dropping all digits.
+
+if [ -n "`echo "$count" | tr -d "[0-9]"`" ] ;
+then
+	print_error "rotation count must be a positive integer"
+	exit $STATUS_ERROR
+fi
+
+if [ $count -eq 0 ] ;
+then
+	print_error "rotation count must be equal to, or greater than, 1"
+	exit $STATUS_ERROR
+fi
+
+# snapshot name is compiled from current UTC datetime,
+#	followed by a dash and group name.
+#
+# 2014-01-01T00:00:00-daily
+
+snapshot="`date -u +%FT%T`-${group}"
+
+if ! $ZFS snapshot $recursive "${filesystem}@${snapshot}" 1>/dev/null 2>/dev/null ;
+then
+	print_error "snapshot failed"
+	exit $STATUS_ERROR
+fi
+
+# print snapshot names in descending order.
+#	in SQL this might be expressed likewise;
+#
+#	SELECT name
+#	FROM snapshots
+#	WHERE filesystem = $filesystem
+#	ORDER BY name DESC
+#
+# the result is then piped to awk,
+#	where all but the first $count matches are printed.
+#
+# for a line to be considered a match, it must consist of;
+#
+#	@ (signalling start of snapshot name, right after the filesystem name),
+#	followed by date format (YYYY-MM-DD),
+#	followed by T,
+#	followed by time format (HH:MM:SS),
+#	followed by dash,
+#	followed by group name
+#	and finally, end of line.
+
+status=$STATUS_OK
+
+$ZFS list -t snapshot -H -r -d 1 -o name -S name "$filesystem" 2>/dev/null \
+  | awk -v group=$group -v count=$count '
+BEGIN {
+  pattern="@[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}-" group "$"
+}
+/pattern/ {
+  match++
+}
+/pattern/ && match > count {
+  print
+}
+' while read snapshot;
+do
+	if ! $ZFS destroy $recursive "$snapshot" 1>/dev/null 2>/dev/null ;
+	then
+		print_error "failed to rotate $snapshot"
+		status=$STATUS_ERROR
+	fi
+done
+
+exit $status
