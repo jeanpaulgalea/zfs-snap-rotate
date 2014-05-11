@@ -148,7 +148,7 @@ fi
 
 # filesystem must be available
 
-if ! $ZFS get -t filesystem filesystem "$filesystem" 1>/dev/null 2>/dev/null ;
+if ! $ZFS get -t filesystem type "$filesystem" 1>/dev/null 2>/dev/null ;
 then
 	print_error "filesystem not found"
 	exit $STATUS_ERROR
